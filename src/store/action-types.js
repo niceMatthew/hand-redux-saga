@@ -1,0 +1,2 @@
+export const INCREMENT_ASYNC = 'INCREMENT_ASYNC';
+export const INCREMENT = 'INCREMENT';
