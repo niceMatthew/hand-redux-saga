@@ -1,68 +1,157 @@
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+## Redux-saga
+- redux-saga是一个redux中间键,其通过副作用方法致力于使应用数据更容易管理，执行并且容易测试
+- 在reducer中都是纯函数，但在实际开发中，我们需要设计异步请求以及不纯粹的操作（“副作用”），不像redux-thunk的侵入式，saga提供一个完整的方式，但也是结构变得复杂。
+- 工作原理以Generator函数来yield Effects
 
-## Available Scripts
+### index.js
+```
+export default function createSagaMiddleware() {
+    function createChannel() {
+        let listener = {}
+        function subscribe(actionType, cb) {
+            listener[actionType]=cb;
+        } 
+        function publish(action) {
+            if(listener[action.type]) {
+                let temp = listener[action.type];
+                delete listener[action.type];
+                temp(action)
+            }
+        }
+        return {subscribe, publish}
+    }
+    let channel = createChannel();
+    function times(cb, total) {
+        let count = 0;
+        return function() {
+            if(++count === total) {
+                cb()
+            }
+        }
+    }
+    function sagaMiddleware({getState,dispatch}) {
+        function run(generator) {
+            let it= typeof generator === 'function' ? generator() : generator;
+            function next(action) {
+                let {value:effect,done}=it.next();
+                if(!done){
+                    if(typeof effect[Symbol.iterator] == 'function') {
+                        run(effect);
+                        next()
+                    } else if(effect.then) {
+                        effect.then(next)
+                    } else {
+                        switch(effect.type) {
+                            case 'take':
+                                channel.subscribe(effect.actionType,next);
+                                break;
+                            case 'put':
+                                dispatch(effect.action);
+                                next();
+                                break;
+                            case 'fork':
+                                let newTask = effect.task()
+                                run(newTask);
+                                next(newTask);
+                                break;
+                            case 'call':
+                                effect.fn(...effect.arg).then(next);
+                                break;
+                            case 'cps':
+                                effect.fn(...effect.args, next);
+                                break;
+                            case 'all':
+                                let fns=effect.fns;
+                                let done=times(next, fns.length);
+                                for (let i=0;i<fns.length;i++){
+                                    let fn=fns[i];
+                                    run(fn,done);
+                                }
+                                break;
+                            case 'cancel':
+                                effect.task.return('over');
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                }
+            }
+            next()
+        }
+        sagaMiddleware.run = run;
+        return function(next) {
+            return function(action) {
+                channel.publish(action);
+                next(action)
+            }
+        }
+    } 
+    return sagaMiddleware;
+}
+```
+### effects.js
+```
+export function take(actionType) {
+    return {
+        type:'take',
+        actionType
+    }
+}
 
-In the project directory, you can run:
+export function put(action) {
+    return {
+        type: 'put',
+        action
+    }
+}
 
-### `yarn start`
+export function fork(task) {
+    return {
+        type: 'fork',
+        task
+    }
+}
 
-Runs the app in the development mode.<br />
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+export  function* takeEvery(actionType, task) {
+    yield fork(function* () {
+        while (true) {
+            yield take(actionType);
+            yield task();
+        }
+    })
+}
 
-The page will reload if you make edits.<br />
-You will also see any lint errors in the console.
+export function call(fn, ...args) {
+    return {
+        type: 'call',
+        fn, 
+        args
+    }
+}
 
-### `yarn test`
+const innerDelay = ms => new Promise((resolve, reject) => {
+    setTimeout(() => {
+        resolve()
+    }, ms)
+})
 
-Launches the test runner in the interactive watch mode.<br />
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+export function delay(...args) {
+    return call(innerDelay, ...args)
+}
 
-### `yarn build`
+export function cps(fn, ...args) {
+    return {
+        type: 'cps',
+        fn,
+        args
+    }
+}
 
-Builds the app for production to the `build` folder.<br />
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.<br />
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `yarn eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
-
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
-
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: https://facebook.github.io/create-react-app/docs/code-splitting
-
-### Analyzing the Bundle Size
-
-This section has moved here: https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size
-
-### Making a Progressive Web App
-
-This section has moved here: https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app
-
-### Advanced Configuration
-
-This section has moved here: https://facebook.github.io/create-react-app/docs/advanced-configuration
-
-### Deployment
-
-This section has moved here: https://facebook.github.io/create-react-app/docs/deployment
-
-### `yarn build` fails to minify
-
-This section has moved here: https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify
+export function all(fns) {
+    return {
+        type: 'all',
+        fns
+    }
+}
+```
